@@ -1,43 +1,24 @@
 # fleetdrop
 
-Drop this machine's clipboard, or some files, onto another machine in your
-fleet, over ssh.
+Send your clipboard or files to another one of your computers with a keypress.
 
-```
-fleetdrop clip [LABEL]            clipboard -> LABEL's clipboard
-fleetdrop file [LABEL] [PATH...]  files -> LABEL:~/Downloads/fleetdrop/
-```
+- **Clipboard:** copy something, press a key, pick a machine. It is now on that
+  machine's clipboard. Text stays text, images stay images.
+- **Files:** press another key, pick files and a machine. They land in
+  `~/Downloads/fleetdrop/` there. Files you copied in a file manager are sent
+  this way too.
 
-- Without LABEL a menu asks which machine (unless there is only one other);
-  without PATHs a file chooser opens.
-- Files copied in a file manager are on the clipboard as `file://` URIs, so
-  `clip` sends those as files.
-- Images are sent as images, text as text.
-- The receiver gets a notification. On Omarchy, clicking it opens the folder.
+The other machine shows a notification. Everything goes over ssh. fleetdrop is
+a single bash script, with no server or background service.
 
-It is a single bash script with no background service. It works on any Wayland
-desktop, and uses Omarchy's menu and file chooser when they are installed.
+> **Note:** fleetdrop has only been tested on my own setup:
+> [Omarchy](https://omarchy.org) 4 (Hyprland 0.56, Arch Linux), sending between
+> Omarchy machines. It is written to work on any Linux with a Wayland desktop,
+> but other setups have not been tried yet. Issues and fixes are welcome.
 
-## Requirements
+## Setup
 
-On both machines:
-
-- `ssh` and `rsync` (3.2.3 or newer)
-- `wl-clipboard` (`wl-copy`, `wl-paste`)
-- `notify-send` (`libnotify`) for notifications; optional
-
-The receiver must be logged in to a Wayland session for `clip`.
-
-The sender also needs, for when you leave out the machine or the files:
-
-- a menu: `omarchy-menu-select`, `walker`, `fuzzel`, `wofi`, `rofi`, `zenity`,
-  or `fzf` in a terminal
-- a file chooser: `omarchy-file-select`, `zenity` or `kdialog`
-
-ssh must log in without asking for a password, using a key
-(`ssh-copy-id <target>` sets that up). fleetdrop never prompts.
-
-## Install
+**1. Install**
 
 ```bash
 git clone https://github.com/Frestina/fleetdrop.git
@@ -45,102 +26,137 @@ cd fleetdrop
 ./install.sh
 ```
 
-This links `~/.local/bin/fleetdrop` to the checkout, so `git pull` updates it.
-It will not replace an existing `fleetdrop` that is not this one, and it does not
-add any keybindings. `./install.sh --uninstall` removes the link.
+This puts the `fleetdrop` command in `~/.local/bin`. Run `git pull` in the
+folder to update it later.
 
-## Machines
+**2. List your machines**
 
-The first run creates `~/.config/fleetdrop/hosts`. List your machines there, one
-per line:
-
-```
-<label>  <ssh target>  [<hostname>]
-```
+Run `fleetdrop clip` once. It creates `~/.config/fleetdrop/hosts`. Open it and
+add a line for each machine:
 
 ```
-desktop  desktop.lan     desktop
-laptop   me@192.0.2.20   my-laptop
+# label   ssh target      hostname
+desktop   desktop.lan     desktop
+laptop    me@192.0.2.20   my-laptop
 ```
 
-- The label is what the menu shows and what you type after `clip` or `file`.
-- The target is whatever you would type after `ssh`: a `Host` from
-  `~/.ssh/config`, `user@address`, or an address.
-- The hostname is what `uname -n` prints on that machine. The line for the
-  machine you are on is skipped, so the same file can be copied to all of them.
+- **label:** the name you pick the machine by.
+- **ssh target:** what you would type after `ssh` to reach it.
+- **hostname:** what `uname -n` prints on that machine. fleetdrop skips the
+  line for the machine it runs on, so you can copy the same file to all of them.
 
-[Fleetwatch](https://github.com/Frestina/omarchy-fleetwatch) uses the same
-format. If you use it too, you can share one list:
+You must be able to `ssh` to each machine without typing a password
+(`ssh-copy-id <target>` sets that up).
 
-```bash
-ln -s ../fleetwatch/hosts ~/.config/fleetdrop/hosts
-```
+**3. Add keybindings**
 
-## Options
+See [Keybindings](#keybindings). fleetdrop does not add any by itself.
 
-Optional settings go in `~/.config/fleetdrop/config`:
+## Usage
 
 ```
-# Extra options for every ssh connection, separated by spaces.
-ssh_options = -o IdentityAgent=none
+fleetdrop clip [LABEL]            send the clipboard to LABEL
+fleetdrop file [LABEL] [PATH...]  send files to LABEL
 ```
 
-Use `-o IdentityAgent=none` if your ssh agent asks for approval on each use
-(Bitwarden, 1Password, KeePassXC), so fleetdrop uses your on-disk key instead.
-
-fleetdrop never forwards your ssh agent. It keeps one shared connection per
-machine open for a minute, so repeat sends get past firewalls that rate-limit
-ssh.
+Leave out LABEL to pick from a menu, or PATH to pick files in a file chooser.
+With only one other machine, no menu is shown.
 
 ## Keybindings
 
-fleetdrop adds no keybindings, so it can't take over a key you already use. Pick
-your own. These are the suggested ones:
+Suggested keys:
 
-| Keys | Action |
+| Keys | Command |
 | --- | --- |
 | `SUPER + ALT + C` | `fleetdrop clip` |
 | `SUPER + SHIFT + ALT + C` | `fleetdrop file` |
 
-**Check that the keys are free first.** In Hyprland, a second binding on the
-same keys does not replace the first one; both run.
+**Check that the keys are free before you add them.** In Hyprland, binding
+keys that are already in use does not replace the old action; both run.
 
-- Omarchy: `omarchy menu keybindings --print`, and look for `SUPER ALT + C`
+- Omarchy: run `omarchy menu keybindings --print` and look for `SUPER ALT + C`
   and `SUPER SHIFT ALT + C`.
-- Hyprland: this prints any binding already on those keys (no output means
-  they are free):
+- Hyprland: this prints any binding already on those keys. No output means
+  they are free.
 
   ```bash
   hyprctl binds -j | jq '.[] | select(.key == "C" and (.modmask == 72 or .modmask == 73))'
   ```
 
-  (`modmask` adds up SUPER 64, ALT 8, SHIFT 1: 72 is SUPER+ALT, 73 adds SHIFT.)
+If they are taken, pick other keys. Then add them:
 
-Then add them:
-
-**Omarchy** (`~/.config/hypr/bindings.lua`):
+**Omarchy**, in `~/.config/hypr/bindings.lua`:
 
 ```lua
 o.bind("SUPER + ALT + C", "Send clipboard to machine", "fleetdrop clip")
 o.bind("SUPER + SHIFT + ALT + C", "Send files to machine", "fleetdrop file")
 ```
 
-**Hyprland** (`~/.config/hypr/hyprland.conf`):
+**Hyprland**, in `~/.config/hypr/hyprland.conf`:
 
 ```
 bindd = SUPER ALT, C, Send clipboard to machine, exec, fleetdrop clip
 bindd = SUPER SHIFT ALT, C, Send files to machine, exec, fleetdrop file
 ```
 
-**GNOME, KDE and others:** add a custom shortcut in the keyboard settings
-that runs `fleetdrop clip` or `fleetdrop file`. The settings warn you when keys are
-already taken.
+**GNOME, KDE and others:** add a custom shortcut in the keyboard settings that
+runs `fleetdrop clip` or `fleetdrop file`.
+
+## Requirements
+
+On every machine:
+
+- `ssh`
+- `rsync` 3.2.3 or newer
+- `wl-clipboard`
+- `notify-send` (from `libnotify`), for notifications
+
+To receive a clipboard, the machine must be logged in to a Wayland desktop.
+
+To pick machines and files from a menu, the sending machine needs one of:
+
+- a menu: Omarchy's, `walker`, `fuzzel`, `wofi`, `rofi`, `zenity`, or `fzf` in
+  a terminal
+- a file chooser: Omarchy's, `zenity` or `kdialog`
+
+`./install.sh` tells you if something is missing.
+
+## Settings
+
+Optional. Put them in `~/.config/fleetdrop/config`:
+
+```
+ssh_options = -o IdentityAgent=none
+```
+
+`ssh_options` adds options to every ssh connection, separated by spaces. The
+example above helps if your ssh agent asks for approval each time it is used
+(Bitwarden, 1Password, KeePassXC): ssh then uses your key file instead.
+
+fleetdrop never forwards your ssh agent. It keeps each ssh connection open for
+a minute, so sending again quickly does not trip firewalls that limit new ssh
+connections.
+
+## Uninstall
+
+```bash
+./install.sh --uninstall
+```
+
+This removes the `fleetdrop` command. Your `~/.config/fleetdrop` folder is
+kept; delete it yourself if you want.
 
 ## See also
 
-[Fleetwatch](https://github.com/Frestina/omarchy-fleetwatch), a bar widget
-that shows which of your machines needs attention. The two are separate tools;
-neither needs the other.
+[Fleetwatch](https://github.com/Frestina/omarchy-fleetwatch), a bar widget that
+shows which of your machines needs attention. Its machine list uses the same
+format, so if you use both you can share one list:
+
+```bash
+ln -s ../fleetwatch/hosts ~/.config/fleetdrop/hosts
+```
+
+The two are separate tools; neither needs the other.
 
 ## License
 

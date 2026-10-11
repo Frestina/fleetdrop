@@ -2,6 +2,8 @@
 
 Send your clipboard or files to another one of your computers with a keypress.
 
+![Copying text, pressing SUPER+ALT+C, picking "desktop" from a menu, and a notification saying the clipboard was sent](docs/demo.gif)
+
 - **Clipboard:** copy something, press a key, pick a machine. It is now on that
   machine's clipboard. Text stays text, images stay images.
 - **Files:** press another key, pick files and a machine. They land in

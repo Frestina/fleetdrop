@@ -1,0 +1,251 @@
+#!/bin/bash
+# handoff: send this machine's clipboard, or some files, to another machine.
+#
+# Usage:
+#   handoff clip [LABEL]            clipboard -> LABEL's clipboard
+#   handoff file [LABEL] [PATH...]  files -> LABEL:~/Downloads/handoff/
+#
+# Files copied in a file manager are on the clipboard as file:// URIs; `clip`
+# sends those as files, like `file`.
+# Without LABEL a menu asks which machine; without PATHs a file chooser opens.
+# Machines come from ~/.config/handoff/hosts; the line matching this hostname
+# is skipped. The receiver gets a notification.
+
+set -uo pipefail
+
+CONFIG_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/handoff
+HOSTS_FILE=$CONFIG_DIR/hosts
+CONFIG_FILE=$CONFIG_DIR/config
+# Never hand the far side our ssh agent just to deliver a clipboard.
+SSH_OPTS=(-o ForwardAgent=no -o BatchMode=yes -o ConnectTimeout=5)
+# Firewalls often rate-limit new ssh connections (ufw `limit 22/tcp`: 6 per
+# 30s). A file send needs two, so share one connection per machine and keep it
+# a minute for repeat sends.
+SSH_OPTS+=(-o ControlMaster=auto -o "ControlPath=${XDG_RUNTIME_DIR:-/tmp}/handoff-%C" -o ControlPersist=60)
+DEST_DIR=Downloads/handoff
+
+# Runs on the receiver, under sh: attach to its desktop session and notify there.
+REMOTE_ENV='
+export XDG_RUNTIME_DIR=/run/user/$(id -u)
+export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus
+WAYLAND_DISPLAY=$(cd "$XDG_RUNTIME_DIR" 2>/dev/null && ls -d wayland-[0-9]* 2>/dev/null | grep -v lock | head -n1)
+export WAYLAND_DISPLAY
+notify() { command -v notify-send >/dev/null && notify-send -a Handoff "$@" || true; }
+'
+
+HOSTS_TEMPLATE='# Machines handoff can send to, one per line:
+#
+#   <label>  <ssh target>  [<hostname>]
+#
+# The label is the name shown in the menu and used on the command line. The
+# target is whatever you would type after `ssh`: a Host from ~/.ssh/config,
+# user@address, or an address. The hostname is what `uname -n` prints on that
+# machine; the line matching the machine you are on is skipped, so the same
+# file can be copied to every machine in the list.
+#
+# For example:
+#
+#   desktop  desktop.lan     desktop
+#   laptop   me@192.0.2.20   my-laptop
+'
+
+notify() { command -v notify-send >/dev/null && notify-send -a Handoff "$@" 2>/dev/null; }
+
+die() {
+  notify -u critical "Handoff failed" "$1"
+  echo "handoff: $1" >&2
+  exit 1
+}
+
+need() { command -v "$1" >/dev/null || die "$1 is not installed${2:+ ($2)}"; }
+
+# Quotes $1 for any POSIX shell.
+sq() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
+
+# Runs the sh script $1 on TARGET, whatever the login shell there is.
+remote() { ssh "${SSH_OPTS[@]}" "$TARGET" "sh -c $(sq "$REMOTE_ENV$1")"; }
+
+load_config() {
+  if [[ ! -e $HOSTS_FILE ]]; then
+    mkdir -p "$CONFIG_DIR" && printf '%s' "$HOSTS_TEMPLATE" >"$HOSTS_FILE" ||
+      die "Could not create $HOSTS_FILE"
+    die "Add your machines to $HOSTS_FILE, then try again"
+  fi
+  # Optional `ssh_options = ...` line: extra options for every ssh connection.
+  local extra
+  extra=$(awk -F= '/^[[:space:]]*ssh_options[[:space:]]*=/ { sub(/^[^=]*=[[:space:]]*/, ""); print }' \
+    "$CONFIG_FILE" 2>/dev/null)
+  if [[ -n $extra ]]; then
+    local opts
+    read -ra opts <<<"$extra"
+    SSH_OPTS=("${opts[@]}" "${SSH_OPTS[@]}")
+  fi
+}
+
+# "<label> <ssh target>" for every machine but this one.
+others() {
+  awk -v me="$(uname -n)" '!/^[[:space:]]*(#|$)/ && $3 != me && $2 != "local" { print $1, $2 }' "$HOSTS_FILE"
+}
+
+my_label() {
+  awk -v me="$(uname -n)" '!/^[[:space:]]*(#|$)/ && $3 == me { print $1; exit }' "$HOSTS_FILE" |
+    grep . || uname -n
+}
+
+# Shows the lines on stdin in a menu titled $1 and prints the one picked.
+# Fails when nothing was picked, and with 127 when there is no menu program.
+menu() {
+  if command -v omarchy-menu-select >/dev/null; then omarchy-menu-select "$1"
+  elif command -v walker >/dev/null; then walker --dmenu -p "$1"
+  elif command -v fuzzel >/dev/null; then fuzzel --dmenu --prompt "$1: "
+  elif command -v wofi >/dev/null; then wofi --dmenu --prompt "$1"
+  elif command -v rofi >/dev/null; then rofi -dmenu -p "$1"
+  elif command -v zenity >/dev/null; then zenity --list --title "$1" --column Machine
+  elif [[ -t 2 ]] && command -v fzf >/dev/null; then fzf --prompt "$1: "
+  else return 127
+  fi
+}
+
+# Prints the files picked in a file chooser titled $1, one per line. Fails with
+# 1 when nothing was picked, more when the chooser failed, 127 when there is none.
+choose_files() {
+  if command -v omarchy-file-select >/dev/null; then omarchy-file-select --title "$1" --multiple
+  elif command -v zenity >/dev/null; then zenity --file-selection --multiple --separator=$'\n' --title "$1"
+  elif command -v kdialog >/dev/null; then kdialog --title "$1" --getopenfilename "$HOME" --multiple --separate-output
+  else return 127
+  fi
+}
+
+# Sets LABEL and TARGET from $1, or from a menu when $1 is empty. With one
+# other machine there is nothing to ask.
+pick_target() {
+  local want=$1
+  if [[ -z $want ]]; then
+    local labels status=0
+    labels=$(others | cut -d' ' -f1)
+    [[ -n $labels ]] || die "No other machines in $HOSTS_FILE"
+    if [[ $labels != *$'\n'* ]]; then
+      want=$labels
+    else
+      want=$(menu "$2" <<<"$labels") || status=$?
+      ((status == 127)) && die "No menu program found; name the machine: handoff ${MODE} LABEL"
+      [[ -n $want ]] || exit 0
+    fi
+  fi
+  TARGET=$(others | awk -v l="$want" '$1 == l { print $2 }')
+  [[ -n $TARGET ]] || die "No machine called '$want' in $HOSTS_FILE"
+  LABEL=$want
+}
+
+is_label() { others | cut -d' ' -f1 | grep -qxF -- "$1"; }
+
+# A text/uri-list on stdin -> local paths, one per line. Fails unless every
+# entry is a file:// URI for something that exists here, so a copied web link
+# or image still goes over as ordinary clipboard content.
+uris_to_paths() {
+  local uri path n=0
+  while IFS= read -r uri || [[ -n $uri ]]; do
+    uri=${uri%$'\r'}
+    [[ -z $uri || $uri == \#* ]] && continue
+    [[ $uri =~ ^file://(localhost)?(/.*)$ ]] || return 1
+    path=${BASH_REMATCH[2]}
+    path=$(printf '%b' "${path//%/\\x}")
+    [[ -e $path ]] || return 1
+    printf '%s\n' "$path"
+    n=$((n + 1))
+  done
+  ((n > 0))
+}
+
+send_clip() {
+  need wl-paste "from wl-clipboard"
+  local types type preview=""
+  types=$(wl-paste --list-types 2>/dev/null) || die "The clipboard is empty"
+
+  if [[ -n ${1:-} ]] && ! is_label "$1"; then
+    die "No machine called '$1' in $HOSTS_FILE"
+  fi
+
+  local copied
+  if grep -qx 'text/uri-list' <<<"$types" &&
+    copied=$(wl-paste -n -t text/uri-list | uris_to_paths); then
+    local paths
+    readarray -t paths <<<"$copied"
+    MODE=file
+    send_files ${1:+"$1"} "${paths[@]}"
+    return
+  fi
+
+  # Images first (a copied image often also offers text), then UTF-8 text.
+  type=$(grep -m1 -x 'image/png' <<<"$types") ||
+    type=$(grep -m1 '^image/' <<<"$types") ||
+    type=$(grep -m1 -xE 'text/plain;charset=utf-8|UTF8_STRING' <<<"$types") ||
+    type=$(head -n1 <<<"$types")
+
+  pick_target "${1:-}" "Send clipboard to"
+
+  if [[ $type == image/* ]]; then
+    preview="Image ($type)"
+  else
+    preview=$(wl-paste -n -t "$type" | head -c 200)
+  fi
+
+  local err
+  err=$(wl-paste -n -t "$type" | remote '
+    [ -n "$WAYLAND_DISPLAY" ] || { echo "no desktop session there" >&2; exit 3; }
+    command -v wl-copy >/dev/null || { echo "wl-clipboard is not installed there" >&2; exit 3; }
+    wl-copy -t '"$(sq "$type")"' >/dev/null 2>&1 &&
+    notify '"$(sq "Clipboard from $(my_label)") $(sq "$preview")" 2>&1 >/dev/null) ||
+    die "Clipboard to $LABEL: ${err:-ssh failed}"
+  notify "Clipboard sent to $LABEL" "$preview"
+}
+
+send_files() {
+  need rsync
+  local want=""
+  if (($# > 0)) && is_label "$1"; then
+    want=$1
+    shift
+  fi
+  local paths=("$@")
+
+  if ((${#paths[@]} == 0)); then
+    local picked status=0
+    picked=$(choose_files "Hand off files") || status=$?
+    ((status == 127)) && die "No file chooser found; name the files: handoff file LABEL PATH..."
+    ((status > 1)) && die "The file chooser did not open"
+    [[ -n $picked ]] || exit 0
+    readarray -t paths <<<"$picked"
+  fi
+  for p in "${paths[@]}"; do
+    [[ -e $p ]] || die "No such file: $p"
+  done
+
+  pick_target "$want" "Send ${#paths[@]} item(s) to"
+
+  local what
+  if ((${#paths[@]} == 1)); then what=$(basename -- "${paths[0]}"); else what="${#paths[@]} items"; fi
+
+  local err
+  err=$(rsync -a --partial --mkpath -e "ssh ${SSH_OPTS[*]}" -- "${paths[@]}" "$TARGET:$DEST_DIR/" 2>&1) ||
+    die "Files to $LABEL: ${err:-rsync failed}"
+
+  # Omarchy's notifications have no action buttons; clicking the toast runs
+  # its --exec command, so that is the "open folder" action.
+  remote '
+    title='"$(sq "From $(my_label): $what")"'
+    if command -v omarchy-notification-send >/dev/null; then
+      omarchy-notification-send --app-name Handoff -u normal -g 󰉋 "$title" \
+        "In ~/'"$DEST_DIR"' · click to open" --exec xdg-open "$HOME/'"$DEST_DIR"'"
+    else
+      notify "$title" "In ~/'"$DEST_DIR"'"
+    fi' >/dev/null 2>&1
+  notify "Sent to $LABEL" "$what → ~/$DEST_DIR"
+}
+
+MODE=${1:-}
+case $MODE in
+  clip) shift; load_config; send_clip "$@" ;;
+  file|files) shift; MODE=file; load_config; send_files "$@" ;;
+  *) sed -n '2,12s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
+esac

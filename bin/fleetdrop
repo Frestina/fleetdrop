@@ -1,19 +1,19 @@
 #!/bin/bash
-# handoff: send this machine's clipboard, or some files, to another machine.
+# fleetdrop: drop this machine's clipboard, or some files, onto another machine.
 #
 # Usage:
-#   handoff clip [LABEL]            clipboard -> LABEL's clipboard
-#   handoff file [LABEL] [PATH...]  files -> LABEL:~/Downloads/handoff/
+#   fleetdrop clip [LABEL]            clipboard -> LABEL's clipboard
+#   fleetdrop file [LABEL] [PATH...]  files -> LABEL:~/Downloads/fleetdrop/
 #
 # Files copied in a file manager are on the clipboard as file:// URIs; `clip`
 # sends those as files, like `file`.
 # Without LABEL a menu asks which machine; without PATHs a file chooser opens.
-# Machines come from ~/.config/handoff/hosts; the line matching this hostname
+# Machines come from ~/.config/fleetdrop/hosts; the line matching this hostname
 # is skipped. The receiver gets a notification.
 
 set -uo pipefail
 
-CONFIG_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/handoff
+CONFIG_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/fleetdrop
 HOSTS_FILE=$CONFIG_DIR/hosts
 CONFIG_FILE=$CONFIG_DIR/config
 # Never hand the far side our ssh agent just to deliver a clipboard.
@@ -21,8 +21,8 @@ SSH_OPTS=(-o ForwardAgent=no -o BatchMode=yes -o ConnectTimeout=5)
 # Firewalls often rate-limit new ssh connections (ufw `limit 22/tcp`: 6 per
 # 30s). A file send needs two, so share one connection per machine and keep it
 # a minute for repeat sends.
-SSH_OPTS+=(-o ControlMaster=auto -o "ControlPath=${XDG_RUNTIME_DIR:-/tmp}/handoff-%C" -o ControlPersist=60)
-DEST_DIR=Downloads/handoff
+SSH_OPTS+=(-o ControlMaster=auto -o "ControlPath=${XDG_RUNTIME_DIR:-/tmp}/fleetdrop-%C" -o ControlPersist=60)
+DEST_DIR=Downloads/fleetdrop
 
 # Runs on the receiver, under sh: attach to its desktop session and notify there.
 REMOTE_ENV='
@@ -30,10 +30,10 @@ export XDG_RUNTIME_DIR=/run/user/$(id -u)
 export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus
 WAYLAND_DISPLAY=$(cd "$XDG_RUNTIME_DIR" 2>/dev/null && ls -d wayland-[0-9]* 2>/dev/null | grep -v lock | head -n1)
 export WAYLAND_DISPLAY
-notify() { command -v notify-send >/dev/null && notify-send -a Handoff "$@" || true; }
+notify() { command -v notify-send >/dev/null && notify-send -a Fleetdrop "$@" || true; }
 '
 
-HOSTS_TEMPLATE='# Machines handoff can send to, one per line:
+HOSTS_TEMPLATE='# Machines fleetdrop can send to, one per line:
 #
 #   <label>  <ssh target>  [<hostname>]
 #
@@ -49,11 +49,11 @@ HOSTS_TEMPLATE='# Machines handoff can send to, one per line:
 #   laptop   me@192.0.2.20   my-laptop
 '
 
-notify() { command -v notify-send >/dev/null && notify-send -a Handoff "$@" 2>/dev/null; }
+notify() { command -v notify-send >/dev/null && notify-send -a Fleetdrop "$@" 2>/dev/null; }
 
 die() {
-  notify -u critical "Handoff failed" "$1"
-  echo "handoff: $1" >&2
+  notify -u critical "Fleetdrop failed" "$1"
+  echo "fleetdrop: $1" >&2
   exit 1
 }
 
@@ -128,7 +128,7 @@ pick_target() {
       want=$labels
     else
       want=$(menu "$2" <<<"$labels") || status=$?
-      ((status == 127)) && die "No menu program found; name the machine: handoff ${MODE} LABEL"
+      ((status == 127)) && die "No menu program found; name the machine: fleetdrop ${MODE} LABEL"
       [[ -n $want ]] || exit 0
     fi
   fi
@@ -211,8 +211,8 @@ send_files() {
 
   if ((${#paths[@]} == 0)); then
     local picked status=0
-    picked=$(choose_files "Hand off files") || status=$?
-    ((status == 127)) && die "No file chooser found; name the files: handoff file LABEL PATH..."
+    picked=$(choose_files "Drop files on a machine") || status=$?
+    ((status == 127)) && die "No file chooser found; name the files: fleetdrop file LABEL PATH..."
     ((status > 1)) && die "The file chooser did not open"
     [[ -n $picked ]] || exit 0
     readarray -t paths <<<"$picked"
@@ -235,7 +235,7 @@ send_files() {
   remote '
     title='"$(sq "From $(my_label): $what")"'
     if command -v omarchy-notification-send >/dev/null; then
-      omarchy-notification-send --app-name Handoff -u normal -g 󰉋 "$title" \
+      omarchy-notification-send --app-name Fleetdrop -u normal -g 󰉋 "$title" \
         "In ~/'"$DEST_DIR"' · click to open" --exec xdg-open "$HOME/'"$DEST_DIR"'"
     else
       notify "$title" "In ~/'"$DEST_DIR"'"

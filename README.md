@@ -1,10 +1,11 @@
-# handoff
+# fleetdrop
 
-Send this machine's clipboard, or some files, to another machine over ssh.
+Drop this machine's clipboard, or some files, onto another machine in your
+fleet, over ssh.
 
 ```
-handoff clip [LABEL]            clipboard -> LABEL's clipboard
-handoff file [LABEL] [PATH...]  files -> LABEL:~/Downloads/handoff/
+fleetdrop clip [LABEL]            clipboard -> LABEL's clipboard
+fleetdrop file [LABEL] [PATH...]  files -> LABEL:~/Downloads/fleetdrop/
 ```
 
 - Without LABEL a menu asks which machine (unless there is only one other);
@@ -34,23 +35,23 @@ The sender also needs, for when you leave out the machine or the files:
 - a file chooser: `omarchy-file-select`, `zenity` or `kdialog`
 
 ssh must log in without asking for a password, using a key
-(`ssh-copy-id <target>` sets that up). handoff never prompts.
+(`ssh-copy-id <target>` sets that up). fleetdrop never prompts.
 
 ## Install
 
 ```bash
-git clone https://github.com/Frestina/handoff.git
-cd handoff
+git clone https://github.com/Frestina/fleetdrop.git
+cd fleetdrop
 ./install.sh
 ```
 
-This links `~/.local/bin/handoff` to the checkout, so `git pull` updates it.
-It will not replace an existing `handoff` that is not this one, and it does not
+This links `~/.local/bin/fleetdrop` to the checkout, so `git pull` updates it.
+It will not replace an existing `fleetdrop` that is not this one, and it does not
 add any keybindings. `./install.sh --uninstall` removes the link.
 
 ## Machines
 
-The first run creates `~/.config/handoff/hosts`. List your machines there, one
+The first run creates `~/.config/fleetdrop/hosts`. List your machines there, one
 per line:
 
 ```
@@ -68,12 +69,16 @@ laptop   me@192.0.2.20   my-laptop
 - The hostname is what `uname -n` prints on that machine. The line for the
   machine you are on is skipped, so the same file can be copied to all of them.
 
-If another tool already keeps your machines in this format, you can symlink
-its file to `~/.config/handoff/hosts`.
+[Fleetwatch](https://github.com/Frestina/omarchy-fleetwatch) uses the same
+format. If you use it too, you can share one list:
+
+```bash
+ln -s ../fleetwatch/hosts ~/.config/fleetdrop/hosts
+```
 
 ## Options
 
-Optional settings go in `~/.config/handoff/config`:
+Optional settings go in `~/.config/fleetdrop/config`:
 
 ```
 # Extra options for every ssh connection, separated by spaces.
@@ -81,21 +86,21 @@ ssh_options = -o IdentityAgent=none
 ```
 
 Use `-o IdentityAgent=none` if your ssh agent asks for approval on each use
-(Bitwarden, 1Password, KeePassXC), so handoff uses your on-disk key instead.
+(Bitwarden, 1Password, KeePassXC), so fleetdrop uses your on-disk key instead.
 
-handoff never forwards your ssh agent. It keeps one shared connection per
+fleetdrop never forwards your ssh agent. It keeps one shared connection per
 machine open for a minute, so repeat sends get past firewalls that rate-limit
 ssh.
 
 ## Keybindings
 
-handoff adds no keybindings, so it can't take over a key you already use. Pick
+fleetdrop adds no keybindings, so it can't take over a key you already use. Pick
 your own. These are the suggested ones:
 
 | Keys | Action |
 | --- | --- |
-| `SUPER + ALT + C` | `handoff clip` |
-| `SUPER + SHIFT + ALT + C` | `handoff file` |
+| `SUPER + ALT + C` | `fleetdrop clip` |
+| `SUPER + SHIFT + ALT + C` | `fleetdrop file` |
 
 **Check that the keys are free first.** In Hyprland, a second binding on the
 same keys does not replace the first one; both run.
@@ -116,20 +121,26 @@ Then add them:
 **Omarchy** (`~/.config/hypr/bindings.lua`):
 
 ```lua
-o.bind("SUPER + ALT + C", "Send clipboard to machine", "handoff clip")
-o.bind("SUPER + SHIFT + ALT + C", "Send files to machine", "handoff file")
+o.bind("SUPER + ALT + C", "Send clipboard to machine", "fleetdrop clip")
+o.bind("SUPER + SHIFT + ALT + C", "Send files to machine", "fleetdrop file")
 ```
 
 **Hyprland** (`~/.config/hypr/hyprland.conf`):
 
 ```
-bindd = SUPER ALT, C, Send clipboard to machine, exec, handoff clip
-bindd = SUPER SHIFT ALT, C, Send files to machine, exec, handoff file
+bindd = SUPER ALT, C, Send clipboard to machine, exec, fleetdrop clip
+bindd = SUPER SHIFT ALT, C, Send files to machine, exec, fleetdrop file
 ```
 
 **GNOME, KDE and others:** add a custom shortcut in the keyboard settings
-that runs `handoff clip` or `handoff file`. The settings warn you when keys are
+that runs `fleetdrop clip` or `fleetdrop file`. The settings warn you when keys are
 already taken.
+
+## See also
+
+[Fleetwatch](https://github.com/Frestina/omarchy-fleetwatch), a bar widget
+that shows which of your machines needs attention. The two are separate tools;
+neither needs the other.
 
 ## License
 

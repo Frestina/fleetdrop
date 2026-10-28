@@ -171,7 +171,7 @@ send_clip() {
     copied=$(wl-paste -n -t text/uri-list | uris_to_paths); then
     local paths
     readarray -t paths <<<"$copied"
-    MODE=file
+    MODE="file"
     send_files ${1:+"$1"} "${paths[@]}"
     return
   fi
@@ -246,6 +246,6 @@ send_files() {
 MODE=${1:-}
 case $MODE in
   clip) shift; load_config; send_clip "$@" ;;
-  file|files) shift; MODE=file; load_config; send_files "$@" ;;
+  file|files) shift; MODE="file"; load_config; send_files "$@" ;;
   *) sed -n '2,12s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
 esac

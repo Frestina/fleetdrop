@@ -8,14 +8,14 @@
 # Files copied in a file manager are on the clipboard as file:// URIs; `clip`
 # sends those as files, like `file`.
 # Without LABEL a menu asks which machine; without PATHs a file chooser opens.
-# Machines come from ~/.config/fleetdrop/hosts; the line matching this hostname
-# is skipped. The receiver gets a notification.
+# Machines come from ~/.config/fleet/hosts, shared by the Fleet tools; the line
+# for this machine is skipped. The receiver gets a notification.
 
 set -uo pipefail
 
-CONFIG_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/fleetdrop
-HOSTS_FILE=$CONFIG_DIR/hosts
-CONFIG_FILE=$CONFIG_DIR/config
+FLEET_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/fleet
+HOSTS_FILE=$FLEET_DIR/hosts
+CONFIG_FILE=$FLEET_DIR/drop/config.toml
 # Never hand the far side our ssh agent just to deliver a clipboard.
 SSH_OPTS=(-o ForwardAgent=no -o BatchMode=yes -o ConnectTimeout=5)
 # Firewalls often rate-limit new ssh connections (ufw `limit 22/tcp`: 6 per
@@ -33,20 +33,20 @@ export WAYLAND_DISPLAY
 notify() { command -v notify-send >/dev/null && notify-send -a Fleetdrop "$@" || true; }
 '
 
-HOSTS_TEMPLATE='# Machines fleetdrop can send to, one per line:
+# The shared hosts file's header (https://github.com/Frestina/fleet/blob/main/HOSTS.md).
+HOSTS_TEMPLATE='# Your machines, one per line, read by every Fleet tool:
 #
 #   <label>  <ssh target>  [<hostname>]
 #
-# The label is the name shown in the menu and used on the command line. The
-# target is whatever you would type after `ssh`: a Host from ~/.ssh/config,
-# user@address, or an address. The hostname is what `uname -n` prints on that
-# machine; the line matching the machine you are on is skipped, so the same
-# file can be copied to every machine in the list.
+# The target is whatever you would type after `ssh`. The line whose hostname
+# is the machine a tool runs on is read there without ssh, so the same file
+# works when copied to your other machines.
+# Format: https://github.com/Frestina/fleet/blob/main/HOSTS.md
 #
 # For example:
 #
-#   desktop  desktop.lan     desktop
-#   laptop   me@192.0.2.20   my-laptop
+#   desktop     desktop.lan      desktop
+#   homeserver  me@192.0.2.10    homeserver
 '
 
 notify() { command -v notify-send >/dev/null && notify-send -a Fleetdrop "$@" 2>/dev/null; }
@@ -67,30 +67,47 @@ remote() { ssh "${SSH_OPTS[@]}" "$TARGET" "sh -c $(sq "$REMOTE_ENV$1")"; }
 
 load_config() {
   if [[ ! -e $HOSTS_FILE ]]; then
-    mkdir -p "$CONFIG_DIR" && printf '%s' "$HOSTS_TEMPLATE" >"$HOSTS_FILE" ||
-      die "Could not create $HOSTS_FILE"
-    die "Add your machines to $HOSTS_FILE, then try again"
+    local name
+    name=$(uname -n)
+    # noclobber: another Fleet tool creating it at the same moment wins.
+    mkdir -p "$FLEET_DIR" &&
+      (set -o noclobber && printf '%s\n%s  %s  %s\n' "$HOSTS_TEMPLATE" "${name%%.*}" "${name%%.*}" "$name" >"$HOSTS_FILE") ||
+      [[ -e $HOSTS_FILE ]] || die "Could not create $HOSTS_FILE"
+    die "Add your other machines to $HOSTS_FILE, then try again"
   fi
-  # Optional `ssh_options = ...` line: extra options for every ssh connection.
-  local extra
-  extra=$(awk -F= '/^[[:space:]]*ssh_options[[:space:]]*=/ { sub(/^[^=]*=[[:space:]]*/, ""); print }' \
-    "$CONFIG_FILE" 2>/dev/null)
-  if [[ -n $extra ]]; then
-    local opts
-    read -ra opts <<<"$extra"
-    SSH_OPTS=("${opts[@]}" "${SSH_OPTS[@]}")
-  fi
+  [[ -r $HOSTS_FILE ]] || die "Cannot read $HOSTS_FILE"
+  local bad
+  bad=$(awk '{ sub(/#.*/, "") } NF == 1 { printf "line %d: %s has no ssh target", FNR, $1; exit }' "$HOSTS_FILE")
+  [[ -z $bad ]] || die "$HOSTS_FILE $bad"
+  # Optional `ssh_options = "..."`: extra options for every ssh connection.
+  local line opts
+  while IFS= read -r line; do
+    if [[ $line =~ ^[[:space:]]*ssh_options[[:space:]]*=[[:space:]]*(\"([^\"]*)\"|\'([^\']*)\')[[:space:]]*(#.*)?$ ]]; then
+      read -ra opts <<<"${BASH_REMATCH[2]}${BASH_REMATCH[3]}"
+      SSH_OPTS=("${opts[@]}" "${SSH_OPTS[@]}")
+    elif [[ $line =~ ^[[:space:]]*ssh_options[[:space:]]*= ]]; then
+      die "$CONFIG_FILE: ssh_options must be a quoted string, like ssh_options = \"-o IdentityAgent=none\""
+    fi
+  done < <(cat "$CONFIG_FILE" 2>/dev/null)
+}
+
+# "<label> <ssh target> <here>" for every machine in the hosts file, where
+# here is 1 for the machine this runs on: target `local`, or a hostname that is
+# `uname -n` or its part before the first dot. # starts a comment anywhere, and
+# columns after the hostname are ignored.
+hosts() {
+  local me
+  me=$(uname -n)
+  awk -v me="$me" -v short="${me%%.*}" '
+    { sub(/#.*/, "") }
+    NF >= 2 { print $1, $2, ($2 == "local" || $3 == me || $3 == short) ? 1 : 0 }
+  ' "$HOSTS_FILE"
 }
 
 # "<label> <ssh target>" for every machine but this one.
-others() {
-  awk -v me="$(uname -n)" '!/^[[:space:]]*(#|$)/ && $3 != me && $2 != "local" { print $1, $2 }' "$HOSTS_FILE"
-}
+others() { hosts | awk '$3 == 0 { print $1, $2 }'; }
 
-my_label() {
-  awk -v me="$(uname -n)" '!/^[[:space:]]*(#|$)/ && $3 == me { print $1; exit }' "$HOSTS_FILE" |
-    grep . || uname -n
-}
+my_label() { hosts | awk '$3 == 1 { print $1; exit }' | grep . || uname -n; }
 
 # Shows the lines on stdin in a menu titled $1 and prints the one picked.
 # Fails when nothing was picked, and with 127 when there is no menu program.

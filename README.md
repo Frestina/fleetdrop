@@ -33,8 +33,10 @@ folder to update it later.
 
 **2. List your machines**
 
-Run `fleetdrop clip` once. It creates `~/.config/fleetdrop/hosts`. Open it and
-add a line for each machine:
+fleetdrop reads `~/.config/fleet/hosts`, the list of machines every
+[Fleet](https://github.com/Frestina/fleet) tool shares. If you have another
+Fleet tool, it is already there. If not, run `fleetdrop clip` once to create
+it with the machine you are on. Then add a line for each other machine:
 
 ```
 # label   ssh target      hostname
@@ -46,6 +48,8 @@ laptop    me@192.0.2.20   my-laptop
 - **ssh target:** what you would type after `ssh` to reach it.
 - **hostname:** what `uname -n` prints on that machine. fleetdrop skips the
   line for the machine it runs on, so you can copy the same file to all of them.
+
+The full format is in [HOSTS.md](https://github.com/Frestina/fleet/blob/main/HOSTS.md).
 
 You must be able to `ssh` to each machine without typing a password
 (`ssh-copy-id <target>` sets that up).
@@ -125,10 +129,10 @@ To pick machines and files from a menu, the sending machine needs one of:
 
 ## Settings
 
-Optional. Put them in `~/.config/fleetdrop/config`:
+Optional. Put them in `~/.config/fleet/drop/config.toml`:
 
-```
-ssh_options = -o IdentityAgent=none
+```toml
+ssh_options = "-o IdentityAgent=none"
 ```
 
 `ssh_options` adds options to every ssh connection, separated by spaces. The
@@ -145,20 +149,17 @@ connections.
 ./install.sh --uninstall
 ```
 
-This removes the `fleetdrop` command. Your `~/.config/fleetdrop` folder is
-kept; delete it yourself if you want.
+This removes the `fleetdrop` command, and asks before removing its settings
+in `~/.config/fleet/drop`. Your list of machines, `~/.config/fleet/hosts`,
+stays while another Fleet tool uses it; when none does, it asks about that
+too.
 
 ## See also
 
-[Fleetwatch](https://github.com/Frestina/omarchy-fleetwatch), a bar widget that
-shows which of your machines needs attention. Its machine list uses the same
-format, so if you use both you can share one list:
-
-```bash
-ln -s ../fleetwatch/hosts ~/.config/fleetdrop/hosts
-```
-
-The two are separate tools; neither needs the other.
+fleetdrop is one of the [Fleet](https://github.com/Frestina/fleet) tools, which
+share one list of machines. [Fleetwatch](https://github.com/Frestina/omarchy-fleetwatch)
+is a bar widget that shows which of your machines needs attention. None of
+them needs another.
 
 ## License
 

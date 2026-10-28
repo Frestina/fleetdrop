@@ -157,7 +157,7 @@ too.
 ## See also
 
 fleetdrop is one of the [Fleet](https://github.com/Frestina/fleet) tools, which
-share one list of machines. [Fleetwatch](https://github.com/Frestina/omarchy-fleetwatch)
+share one list of machines. [Fleetwatch](https://github.com/Frestina/fleetwatch)
 is a bar widget that shows which of your machines needs attention. None of
 them needs another.
 

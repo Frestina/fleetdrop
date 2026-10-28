@@ -2,6 +2,8 @@
 
 Send your clipboard or files to another one of your computers with a keypress.
 
+<p align="center">Part of <a href="https://github.com/Frestina/fleet">Fleet</a>: fleetwatch · fleetlog · fleetdrop</p>
+
 ![Copying text, pressing SUPER+ALT+C, picking "desktop" from a menu, and a notification saying the clipboard was sent](docs/demo.gif)
 
 - **Clipboard:** copy something, press a key, pick a machine. It is now on that
